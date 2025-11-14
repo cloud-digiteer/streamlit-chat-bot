@@ -1,5 +1,6 @@
-streamlit
-Pillow
-python-dotenv   # optional if you remove dotenv
-langchain
-langchain-openai
+streamlit 
+langchain-openai 
+python-dotenv 
+pillow 
+python-docx 
+PyPDF2

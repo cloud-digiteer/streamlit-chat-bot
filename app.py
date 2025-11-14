@@ -6,6 +6,9 @@ from langchain_core.output_parsers import StrOutputParser
 # from dotenv import load_dotenv
 import os
 
+import docx
+import csv
+import PyPDF2
 
 # Load .env variables
 # load_dotenv()
@@ -20,14 +23,54 @@ st.title("Digi Chatbot")
 # Sidebar for uploads
 # ----------------------
 st.sidebar.header("Upload Files or Images")
-uploaded_file = st.sidebar.file_uploader("Upload a file", type=["pdf", "txt", "csv"])
+uploaded_file = st.sidebar.file_uploader("Upload a file", type=["pdf", "txt", "csv", "docx"])
 uploaded_image = st.sidebar.file_uploader("Upload an image", type=["png", "jpg", "jpeg"])
 
 if uploaded_file:
     st.sidebar.success(f"Uploaded file: {uploaded_file.name}")
+
 if uploaded_image:
     image = Image.open(uploaded_image)
     st.sidebar.image(image, caption="Uploaded Image", use_column_width=True)
+
+# ----------------------
+# File Reader
+# ----------------------
+def read_uploaded_file(file):
+    file_type = file.type
+    
+    if file_type == "text/plain":
+        return file.read().decode("utf-8")
+
+    elif file_type == "application/pdf":
+        reader = PyPDF2.PdfReader(file)
+        text = ""
+        for page in reader.pages:
+            extracted = page.extract_text()
+            if extracted:
+                text += extracted + "\n"
+        return text
+
+    elif file_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        doc = docx.Document(file)
+        return "\n".join([para.text for para in doc.paragraphs])
+
+    elif file_type == "text/csv":
+        csv_text = ""
+        decoded = file.read().decode("utf-8").splitlines()
+        reader = csv.reader(decoded)
+        for row in reader:
+            csv_text += ", ".join(row) + "\n"
+        return csv_text
+
+    else:
+        return "❌ Unsupported file type"
+
+# Extract file content if uploaded
+file_text = ""
+if uploaded_file:
+    file_text = read_uploaded_file(uploaded_file)
+
 
 # ----------------------
 # LangChain AI Setup
@@ -40,7 +83,9 @@ You are Toyota AI — a polite, friendly, and professional virtual sales represe
 Your Goal:
 Engage customers naturally through chat, just like a real dealership salesperson would. Help them with inquiries about vehicles, specifications, pricing, promotions, financing, comparisons, test drives, and after-sales services.
 
-User Question : {question}
+User Question: {question}
+Documents: {documents}
+
 ---
 
 BEHAVIOR & CONDUCT RULES
@@ -147,6 +192,7 @@ Mission Recap:
 Act as a trusted dealership sales agent. Provide accurate, helpful, and confident responses grounded only in verified dealership data. Assist customers naturally — whether they're asking about cars, comparing models, or booking a test drive — and make every chat feel like a genuine conversation with a professional car sales expert.
 """
 
+
 prompt_template = ChatPromptTemplate.from_template(prompt_template_text)
 ai_chain = prompt_template | llm | StrOutputParser()
 
@@ -155,6 +201,7 @@ def ask_ai(question, documents=""):
         return ai_chain.invoke({"question": question, "documents": documents})
     except Exception as e:
         return f"Error: {e}"
+
 
 # ----------------------
 # Initialize session state
@@ -171,7 +218,7 @@ with st.form(key="chat_form_unique", clear_on_submit=True):
 
 if submitted and user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
-    ai_response = ask_ai(user_input)
+    ai_response = ask_ai(user_input, file_text)
     st.session_state.messages.append({"role": "bot", "content": ai_response})
 
 # ----------------------
@@ -182,7 +229,7 @@ col1, col2, col3 = st.columns(3)
 
 def handle_quick_action(user_msg):
     st.session_state.messages.append({"role": "user", "content": user_msg})
-    ai_response = ask_ai(user_msg)
+    ai_response = ask_ai(user_msg, file_text)
     st.session_state.messages.append({"role": "bot", "content": ai_response})
 
 with col1:
