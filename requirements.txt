@@ -1,3 +1,5 @@
-streamlit 
-pillow
+streamlit
+Pillow
+python-dotenv   # optional if you remove dotenv
+langchain
 langchain-openai
