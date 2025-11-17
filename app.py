@@ -1,254 +1,166 @@
 import streamlit as st
 from PIL import Image
-from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.messages import HumanMessage
-from dotenv import load_dotenv
 import os
-import base64
-from io import BytesIO
 
-import docx
-import csv
-import PyPDF2
+from functionalities import (
+    analyze_image_with_ai,
+    read_uploaded_file,
+    ask_ai
+)
 
-# Load .env variables
-load_dotenv()
-
-# ----------------------
-# Page config
-# ----------------------
-st.set_page_config(page_title="Chatbot Frontend", page_icon="💬", layout="wide")
-st.title("Digi Chatbot")
+def handle_quick_action(user_msg, combined_context):
+    st.session_state.messages.append({"role": "user", "content": user_msg})
+    ai_response = ask_ai(user_msg, combined_context)
+    st.session_state.messages.append({"role": "bot", "content": ai_response})
 
 # ----------------------
-# Sidebar for uploads
+# Page Configuration
 # ----------------------
-st.sidebar.header("Upload Files or Images")
-st.sidebar.write("📤 Upload any document, image, receipt, or handwritten note")
-uploaded_file = st.sidebar.file_uploader("Upload a file", type=["pdf", "txt", "csv", "docx"])
-uploaded_image = st.sidebar.file_uploader("Upload an image (supports handwriting & receipts)", type=["png", "jpg", "jpeg"])
-
-if uploaded_file:
-    st.sidebar.success(f"Uploaded file: {uploaded_file.name}")
-
-if uploaded_image:
-    image = Image.open(uploaded_image)
-    st.sidebar.image(image, caption="Uploaded Image", use_container_width=True)
+st.set_page_config(
+    page_title="Toyota Digi Chatbot",
+    page_icon="🚗",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # ----------------------
-# Image Processing Functions
+# Custom Styling (Toyota Colors)
 # ----------------------
-def encode_image_to_base64(image_file):
-    """Convert image to base64 string for OpenAI API"""
-    image = Image.open(image_file)
-    buffered = BytesIO()
-    image.save(buffered, format=image.format if image.format else "PNG")
-    return base64.b64encode(buffered.getvalue()).decode('utf-8')
-
-def analyze_image_with_ai(image_file):
-    """Analyze image using OpenAI Vision API - supports any type of image including handwritten text and receipts"""
-    try:
-        # Encode image to base64
-        base64_image = encode_image_to_base64(image_file)
-        
-        # Create a ChatOpenAI instance with vision capabilities
-        llm_vision = ChatOpenAI(
-            model="gpt-4o",  # gpt-4o supports vision
-            temperature=0,
-            api_key=os.getenv("OPENAI_API_KEY")
-        )
-        
-        # Create message with image
-        message = HumanMessage(
-            content=[
-                {
-                    "type": "text",
-                    "text": """You are an advanced OCR and image analysis system. Analyze this image thoroughly and extract ALL information:
-
-                    PRIMARY TASKS:
-                    1. **Text Extraction (OCR)**: Extract ALL visible text, including:
-                       - Printed text
-                       - HANDWRITTEN text (cursive, print, notes)
-                       - Text in any language
-                       - Numbers, dates, codes
-                    
-                    2. **Document Analysis**: If this is a document, identify:
-                       - Document type (receipt, invoice, form, letter, note, etc.)
-                       - Key information (dates, amounts, names, addresses, phone numbers)
-                       - Line items, totals, calculations
-                       - Signatures or stamps
-                    
-                    3. **Receipt/Invoice Analysis**: If this is a receipt or invoice, extract:
-                       - Store/business name and location
-                       - Date and time of transaction
-                       - Itemized list with prices
-                       - Subtotals, taxes, discounts
-                       - Total amount
-                       - Payment method
-                       - Receipt/transaction number
-                    
-                    4. **Visual Content**: Describe what you see:
-                       - Objects, products, people, scenes
-                       - Brands, logos, labels
-                       - Colors, layout, condition
-                       - Any relevant visual details
-                    
-                    5. **Handwritten Notes**: Pay special attention to handwritten content:
-                       - Transcribe handwritten text as accurately as possible
-                       - Note if handwriting is unclear
-                       - Capture margin notes, annotations, signatures
-                    
-                    Provide a comprehensive, structured analysis with all extracted information."""
-                },
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/jpeg;base64,{base64_image}"
-                    }
-                }
-            ]
-        )
-        
-        # Get response
-        response = llm_vision.invoke([message])
-        return response.content
-        
-    except Exception as e:
-        return f"Error analyzing image: {str(e)}"
-
-def analyze_pdf_with_ai(pdf_file):
-    """Analyze PDF using OpenAI Vision API - converts PDF pages to images for visual analysis including handwritten content"""
-    try:
-        # First extract text using PyPDF2
-        reader = PyPDF2.PdfReader(pdf_file)
-        extracted_text = ""
-        for page in reader.pages:
-            text = page.extract_text()
-            if text:
-                extracted_text += text + "\n"
-        
-        # Try to convert PDF to images for vision analysis (if pdf2image is available)
-        try:
-            from pdf2image import convert_from_bytes
-            
-            pdf_file.seek(0)  # Reset file pointer
-            pdf_bytes = pdf_file.read()
-            
-            # Convert first 3 pages to images (to avoid token limits)
-            images = convert_from_bytes(pdf_bytes, first_page=1, last_page=min(3, len(reader.pages)))
-            
-            llm_vision = ChatOpenAI(
-                model="gpt-4o",
-                temperature=0,
-                api_key=os.getenv("OPENAI_API_KEY")
-            )
-            
-            visual_analysis = ""
-            for i, img in enumerate(images):
-                # Convert PIL image to base64
-                buffered = BytesIO()
-                img.save(buffered, format="PNG")
-                base64_image = base64.b64encode(buffered.getvalue()).decode('utf-8')
-                
-                message = HumanMessage(
-                    content=[
-                        {
-                            "type": "text",
-                            "text": f"""Analyze page {i+1} of this PDF document. Extract ALL information including:
-                            - Printed text
-                            - Handwritten text, notes, or annotations
-                            - Tables, charts, diagrams
-                            - Signatures, stamps, marks
-                            - Any visual elements
-                            
-                            Provide a comprehensive analysis of this page."""
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/png;base64,{base64_image}"
-                            }
-                        }
-                    ]
-                )
-                
-                response = llm_vision.invoke([message])
-                visual_analysis += f"\n--- PAGE {i+1} VISUAL ANALYSIS ---\n{response.content}\n"
-            
-            return f"TEXT EXTRACTION:\n{extracted_text}\n\nVISUAL ANALYSIS (with handwriting detection):\n{visual_analysis}"
-            
-        except ImportError:
-            # If pdf2image is not available, return only text extraction
-            return f"TEXT EXTRACTION:\n{extracted_text}\n\n(Note: Install 'pdf2image' and 'poppler' for handwriting and visual analysis of PDFs)"
-            
-    except Exception as e:
-        return f"Error analyzing PDF: {str(e)}"
+st.markdown("""
+    <style>
+    /* Toyota Red: #EB0A1E, Dark Gray: #2D2D2D, Light Gray: #F7F7F7 */
+    .main {
+        background-color: #F7F7F7;
+    }
+    .stButton>button {
+        background-color: #EB0A1E;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        padding: 12px 24px;
+        font-weight: 600;
+        transition: all 0.3s ease;
+    }
+    .stButton>button:hover {
+        background-color: #C4060F;
+        box-shadow: 0 4px 12px rgba(235, 10, 30, 0.3);
+    }
+    .chat-message {
+        padding: 16px;
+        border-radius: 10px;
+        margin-bottom: 12px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .user-message {
+        border-left: 4px solid #EB0A1E;
+    }
+    .bot-message {
+        border-left: 4px solid #2D2D2D;
+    }
+    .sidebar .sidebar-content {
+        background-color: #FFFFFF;
+    }
+    h1, h2, h3 {
+        color: #2D2D2D;
+    }
+    .logo-container {
+        text-align: center;
+        padding: 20px 0;
+        background-color: #EB0A1E;
+        border-radius: 10px;
+        margin-bottom: 20px;
+    }
+    .logo-placeholder {
+        background-color: white;
+        padding: 20px;
+        border-radius: 8px;
+        display: inline-block;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 # ----------------------
-# File Reader
+# Header with Logo Placeholder
 # ----------------------
-def read_uploaded_file(file):
-    file_type = file.type
+col_logo, col_title = st.columns([1, 3])
+
+with col_logo:
+    # Logo placeholder - replace 'path/to/your/logo.png' with your actual logo path
+    logo_path = "./toyota-white.png"  # Change this to your logo file path
     
-    if file_type == "text/plain":
-        return file.read().decode("utf-8")
-
-    elif file_type == "application/pdf":
-        reader = PyPDF2.PdfReader(file)
-        text = ""
-        for page in reader.pages:
-            extracted = page.extract_text()
-            if extracted:
-                text += extracted + "\n"
-        return text
-
-    elif file_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-        doc = docx.Document(file)
-        return "\n".join([para.text for para in doc.paragraphs])
-
-    elif file_type == "text/csv":
-        csv_text = ""
-        decoded = file.read().decode("utf-8").splitlines()
-        reader = csv.reader(decoded)
-        for row in reader:
-            csv_text += ", ".join(row) + "\n"
-        return csv_text
-
+    if os.path.exists(logo_path):
+        logo = Image.open(logo_path)
+        st.image(logo, width=250)
     else:
-        return "❌ Unsupported file type"
+        # Placeholder for logo
+        st.markdown("""
+            <div class="logo-container">
+                <div class="logo-placeholder">
+                    <h2 style="color: #EB0A1E; margin: 0;">YOUR LOGO</h2>
+                    <p style="color: #666; font-size: 12px; margin: 5px 0 0 0;">Place logo.png in root directory</p>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
 
-# Extract file content if uploaded
+with col_title:
+    st.title(" Toyota Assistant")
+    st.markdown("**Your intelligent automotive companion**")
+
+st.divider()
+
+# ----------------------
+# Sidebar for File Uploads
+# ----------------------
+with st.sidebar:
+    st.header("📁 Upload Document")
+    st.markdown("Upload documents, images, receipts, or handwritten notes for analysis")
+    
+    st.subheader("📄 Document Upload")
+    uploaded_file = st.file_uploader(
+        "Choose a file",
+        type=["pdf", "txt", "csv", "docx"],
+        help="Supports PDF, TXT, CSV, and DOCX files"
+    )
+    
+    st.subheader("🖼️ Image Upload")
+    uploaded_image = st.file_uploader(
+        "Choose an image",
+        type=["png", "jpg", "jpeg"],
+        help="Supports handwriting and receipt recognition"
+    )
+    
+    st.divider()
+
+# ----------------------
+# Process Uploaded Files
+# ----------------------
 file_text = ""
 image_analysis = ""
 
 if uploaded_file:
     with st.sidebar:
-        with st.spinner("📄 Processing file..."):
-            # Check if it's a PDF - use vision analysis for PDFs too
-            if uploaded_file.type == "application/pdf":
-                file_text = analyze_pdf_with_ai(uploaded_file)
-                st.success("✅ PDF analyzed (text + visual/handwriting detection)")
-            else:
-                file_text = read_uploaded_file(uploaded_file)
-                st.success("✅ File content extracted")
+        st.success(f"✅ File loaded: **{uploaded_file.name}**")
+        with st.spinner("📄 Analyzing document..."):
+            file_text = read_uploaded_file(uploaded_file)
+            st.info("📊 Content extracted successfully")
         
-        # Show analysis in expandable section
-        with st.expander("View File Content"):
-            st.text(file_text[:2000] + "..." if len(file_text) > 2000 else file_text)
+        with st.expander("📖 View Document Content"):
+            preview_text = file_text[:2000] + "..." if len(file_text) > 2000 else file_text
+            st.text_area("Content Preview", preview_text, height=200, disabled=True)
 
 if uploaded_image:
     with st.sidebar:
-        with st.spinner("🔍 Analyzing image (OCR + handwriting detection)..."):
+        image = Image.open(uploaded_image)
+        st.image(image, caption="Uploaded Image", use_container_width=True)
+        
+        with st.spinner("🔍 Analyzing image..."):
             image_analysis = analyze_image_with_ai(uploaded_image)
         st.success("✅ Image analyzed successfully!")
         
-        # Show analysis in expandable section
-        with st.expander("View Image Analysis"):
+        with st.expander("🔎 View Image Analysis"):
             st.write(image_analysis)
 
-# Combine file text and image analysis
+# Combine context
 combined_context = ""
 if file_text:
     combined_context += f"FILE CONTENT:\n{file_text}\n\n"
@@ -256,157 +168,81 @@ if image_analysis:
     combined_context += f"IMAGE ANALYSIS:\n{image_analysis}\n\n"
 
 # ----------------------
-# LangChain AI Setup
-# ----------------------
-llm = ChatOpenAI(model="gpt-4o", temperature=0, api_key=os.getenv("OPENAI_API_KEY"))
-
-prompt_template_text = """
-You are an intelligent AI assistant with advanced document analysis and visual understanding capabilities.
-
-Your Goal:
-Help users understand and extract information from any uploaded documents, images, receipts, handwritten notes, or files. Answer questions about the content accurately and helpfully.
-
-User Question: {question}
-Documents/Context: {documents}
-
----
-
-CAPABILITIES
-
-1. **Document Understanding**
-   - You can read and analyze any type of document (PDF, Word, text files)
-   - You can extract information from tables, forms, and structured data
-   - You can understand context and relationships within documents
-
-2. **Image & OCR Analysis**
-   - You can read printed text from images
-   - You can read HANDWRITTEN text (cursive, print, notes)
-   - You can analyze receipts and invoices (extract items, prices, totals)
-   - You can identify objects, products, brands, and visual content
-   - You can read text in multiple languages
-
-3. **Receipt & Invoice Processing**
-   - Extract merchant/store information
-   - Identify transaction dates and times
-   - List all items with prices
-   - Calculate totals, taxes, and discounts
-   - Extract payment methods and receipt numbers
-
-4. **General Analysis**
-   - Answer questions about uploaded content
-   - Summarize documents or images
-   - Compare information across multiple uploads
-   - Extract specific data points requested by users
-
----
-
-BEHAVIOR GUIDELINES
-
-1. **Accuracy First**
-   - Always base your answers on the actual content provided
-   - If information is unclear or missing, say so honestly
-   - For handwritten text, acknowledge if it's difficult to read
-   - Don't make assumptions beyond what's visible
-
-2. **Be Helpful and Clear**
-   - Provide structured, easy-to-read responses
-   - Break down complex information into digestible parts
-   - Use bullet points or lists when appropriate
-   - Highlight key information the user is asking about
-
-3. **Context Awareness**
-   - Remember the context from uploaded files throughout the conversation
-   - Reference specific details when answering questions
-   - If asked about something not in the uploads, clearly state that
-
-4. **Versatility**
-   - Handle any type of content: business documents, personal notes, receipts, photos, forms, etc.
-   - Adapt your tone based on the context (professional for business docs, casual for personal content)
-   - Support both English and Filipino language queries
-
----
-
-RESPONSE GUIDELINES
-
-- Keep responses concise but complete
-- Quote specific text from documents when relevant
-- For receipts: provide itemized breakdowns when asked
-- For handwritten content: transcribe as accurately as possible
-- If you see multiple languages, handle them appropriately
-- Always be respectful and professional
-
----
-
-LIMITATIONS
-
-- You can only analyze what's been uploaded in the current session
-- You cannot access external information not provided in the uploads
-- For very blurry or illegible text, acknowledge the limitation
-- You cannot process or save sensitive information beyond this conversation
-
----
-
-Remember: Your role is to be a helpful assistant that makes any uploaded content accessible and understandable to the user. Whether it's a car brochure, grocery receipt, handwritten note, business document, or personal photo - help the user extract value from it.
-"""
-
-prompt_template = ChatPromptTemplate.from_template(prompt_template_text)
-ai_chain = prompt_template | llm | StrOutputParser()
-
-def ask_ai(question, documents=""):
-    try:
-        return ai_chain.invoke({"question": question, "documents": documents})
-    except Exception as e:
-        return f"Error: {e}"
-
-# ----------------------
-# Initialize session state
+# Initialize Session State
 # ----------------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 # ----------------------
-# Handle user input from form
+# Main Chat Interface
 # ----------------------
-with st.form(key="chat_form_unique", clear_on_submit=True):
-    user_input = st.text_input("Type your message:")
-    submitted = st.form_submit_button("Send")
+st.subheader("💬 Chat Interface")
+
+# Display chat history
+chat_container = st.container()
+with chat_container:
+    if len(st.session_state.messages) == 0:
+        st.info("👋 Welcome! How can I assist you today?")
+    
+    for msg in st.session_state.messages:
+        if msg["role"] == "user":
+            st.markdown(f"""
+                <div class="chat-message user-message">
+                    <strong>👤 You:</strong><br>{msg['content']}
+                </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+                <div class="chat-message bot-message">
+                    <strong>🤖 Assistant:</strong><br>{msg['content']}
+                </div>
+            """, unsafe_allow_html=True)
+
+# Chat input form
+with st.form(key="chat_input_form", clear_on_submit=True):
+    col_input, col_send = st.columns([5, 1])
+    
+    with col_input:
+        user_input = st.text_input(
+            "Type your message",
+            placeholder="Ask me anything about Toyota vehicles, services, or upload documents...",
+            label_visibility="collapsed"
+        )
+    
+    with col_send:
+        submitted = st.form_submit_button("Send ➤", use_container_width=True)
 
 if submitted and user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
     ai_response = ask_ai(user_input, combined_context)
     st.session_state.messages.append({"role": "bot", "content": ai_response})
+    st.rerun()
 
 # ----------------------
 # Quick Action Buttons
 # ----------------------
-st.subheader("Quick Actions")
+st.divider()
+st.subheader("⚡ Quick Actions")
+
 col1, col2, col3, col4 = st.columns(4)
 
-def handle_quick_action(user_msg):
-    st.session_state.messages.append({"role": "user", "content": user_msg})
-    ai_response = ask_ai(user_msg, combined_context)
-    st.session_state.messages.append({"role": "bot", "content": ai_response})
-
 with col1:
-    if st.button("Ask A Representative"):
-        handle_quick_action("I want to ask a representative.")
+    if st.button("📞 Ask A Representative", use_container_width=True):
+        handle_quick_action("I want to ask a representative.", combined_context)
+        st.rerun()
 
 with col2:
-    if st.button("Book A Test Drive"):
-        handle_quick_action("I want to book a test drive.")
+    if st.button("🚗 Book A Test Drive", use_container_width=True):
+        handle_quick_action("I want to book a test drive.", combined_context)
+        st.rerun()
 
 with col3:
-    if st.button("Explore Promos"):
-        handle_quick_action("I want to explore promos.")
+    if st.button("🎁 Explore Promos", use_container_width=True):
+        handle_quick_action("I want to explore current promotions.", combined_context)
+        st.rerun()
 
-# ----------------------
-# Display chat messages inside the container
-# ----------------------
-st.subheader("Chat with Bot")
-chat_container = st.container()
-with chat_container:
-    for msg in st.session_state.messages:
-        if msg["role"] == "user":
-            st.markdown(f"**You:** {msg['content']}")
-        else:
-            st.markdown(f"**Bot:** {msg['content']}")
+with col4:
+    if st.button("🔧 Service Booking", use_container_width=True):
+        handle_quick_action("I want to book a service appointment.", combined_context)
+        st.rerun()
+
