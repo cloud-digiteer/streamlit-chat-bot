@@ -214,7 +214,7 @@ with st.form(key="chat_input_form", clear_on_submit=True):
 
 if submitted and user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
-    ai_response = ask_ai(user_input, combined_context)
+    ai_response = ask_ai(user_input, combined_context, st.session_state.messages)
     st.session_state.messages.append({"role": "bot", "content": ai_response})
     st.rerun()
 

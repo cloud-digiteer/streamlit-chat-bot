@@ -200,7 +200,7 @@ def read_uploaded_file(file):
         return "❌ Unsupported file type"
     
     
-def ask_ai(question, documents=""):
+def ask_ai(question, chat_history, documents=""):
     llm = ChatOpenAI(model="gpt-4o", temperature=0, api_key=os.getenv("OPENAI_API_KEY"))
 
     prompt_template_text = """
@@ -211,7 +211,7 @@ def ask_ai(question, documents=""):
         
         User Question: {question}
         Documents: {documents}
-
+        Chat History: {chat_history}
         ---
 
         BEHAVIOR & CONDUCT RULES
@@ -323,7 +323,7 @@ def ask_ai(question, documents=""):
     ai_chain = prompt_template | llm | StrOutputParser()
 
     try:
-        return ai_chain.invoke({"question": question, "documents": documents})
+        return ai_chain.invoke({"question": question, "documents": documents, "chat_history": chat_history})
     except Exception as e:
         return f"Error: {e}"
     
